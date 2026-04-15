@@ -12,25 +12,29 @@ export default async function handler(req, res) {
 
     // 🔥 1. VISION (kalau ada gambar)
     if (image) {
-      const vision = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Deskripsikan produk ini secara detail untuk marketing." },
-              {
-                type: "image_url",
-                image_url: {
-                  url: image,
+      try {
+        const vision = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Deskripsikan produk ini secara detail untuk marketing." },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: image,
+                  },
                 },
-              },
-            ],
-          },
-        ],
-      });
+              ],
+            },
+          ],
+        });
 
-      imageDescription = vision.choices[0].message.content;
+        imageDescription = vision.choices[0].message.content;
+      } catch (err) {
+        console.error("VISION ERROR:", err.message);
+      }
     }
 
     const finalDescription = description || imageDescription;
@@ -91,7 +95,7 @@ WAJIB gunakan format ini:
       .filter((p) => p.length > 0)
       .slice(0, 5);
 
-    // 🔥 4. GENERATE GAMBAR
+    // 🔥 4. GENERATE GAMBAR + DEBUG
     const images = [];
 
     for (let p of prompts) {
@@ -102,9 +106,13 @@ WAJIB gunakan format ini:
           size: "1024x1024",
         });
 
-        images.push(img.data[0].url);
+        images.push(img.data?.[0]?.url || null);
+
       } catch (err) {
-        images.push(null);
+        console.error("IMAGE ERROR:", err.message);
+
+        // 🔥 fallback biar tetap ada output
+        images.push("ERROR: " + err.message);
       }
     }
 
@@ -115,6 +123,8 @@ WAJIB gunakan format ini:
     });
 
   } catch (error) {
+    console.error("MAIN ERROR:", error.message);
+
     res.status(500).json({
       error: error.message,
     });
