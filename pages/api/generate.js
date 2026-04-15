@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
     let imageDescription = "";
 
-    // 🔥 kalau ada gambar → pakai AI vision
+    // 🔥 1. VISION (kalau ada gambar)
     if (image) {
       const vision = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -22,7 +22,7 @@ export default async function handler(req, res) {
               {
                 type: "image_url",
                 image_url: {
-                  url: image, // base64 langsung dari frontend
+                  url: image,
                 },
               },
             ],
@@ -35,6 +35,7 @@ export default async function handler(req, res) {
 
     const finalDescription = description || imageDescription;
 
+    // 🔥 2. GENERATE SCRIPT
     const prompt = `
 Kamu adalah content creator TikTok profesional.
 
@@ -79,8 +80,38 @@ WAJIB gunakan format ini:
       messages: [{ role: "user", content: prompt }],
     });
 
+    const text = completion.choices[0].message.content;
+
+    // 🔥 3. AMBIL IMAGE PROMPTS
+    const imageSection = text.split("[IMAGE]")[1]?.split("[VIDEO]")[0] || "";
+
+    const prompts = imageSection
+      .split("\n")
+      .map((p) => p.replace(/^\d+\.\s*/, "").trim())
+      .filter((p) => p.length > 0)
+      .slice(0, 5);
+
+    // 🔥 4. GENERATE GAMBAR
+    const images = [];
+
+    for (let p of prompts) {
+      try {
+        const img = await openai.images.generate({
+          model: "gpt-image-1",
+          prompt: p,
+          size: "1024x1024",
+        });
+
+        images.push(img.data[0].url);
+      } catch (err) {
+        images.push(null);
+      }
+    }
+
+    // 🔥 RESPONSE FINAL
     res.status(200).json({
-      result: completion.choices[0].message.content,
+      result: text,
+      images,
     });
 
   } catch (error) {
