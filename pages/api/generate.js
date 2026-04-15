@@ -4,129 +4,201 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// 10 scene storytelling TikTok
+const SCENE_ROLES = [
+  "Hook / Problem",
+  "Agitasi",
+  "Solusi Reveal",
+  "Close Up Produk",
+  "Demo / Cara Pakai",
+  "Before vs After",
+  "Social Proof",
+  "Benefit Utama",
+  "Benefit Kedua",
+  "Call to Action",
+];
+
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
+    console.log("API CALLED");
+
     const { product, description, target, price, style, image } = req.body;
+
+    if (!product) {
+      return res.status(400).json({ error: "Nama produk wajib diisi." });
+    }
 
     let imageDescription = "";
 
-    // 🔥 1. VISION (kalau ada gambar)
+    // ✅ 1. VISION — hanya jika ada gambar
     if (image) {
       try {
         const vision = await openai.chat.completions.create({
-          model: "gpt-4o",
+          model: "gpt-4o-mini",
+          max_tokens: 150,
           messages: [
             {
               role: "user",
               content: [
-                { type: "text", text: "Deskripsikan produk ini secara detail untuk marketing." },
+                {
+                  type: "text",
+                  text: "Deskripsikan produk ini untuk marketing secara singkat dalam 2-3 kalimat.",
+                },
                 {
                   type: "image_url",
-                  image_url: {
-                    url: image,
-                  },
+                  image_url: { url: image, detail: "low" },
                 },
               ],
             },
           ],
         });
-
-        imageDescription = vision.choices[0].message.content;
+        imageDescription = vision.choices?.[0]?.message?.content || "";
       } catch (err) {
         console.error("VISION ERROR:", err.message);
       }
     }
 
-    const finalDescription = description || imageDescription;
+    const finalDescription =
+      description ||
+      imageDescription ||
+      "Produk menarik untuk kebutuhan sehari-hari";
 
-    // 🔥 2. GENERATE SCRIPT
-    const prompt = `
-Kamu adalah content creator TikTok profesional.
+    // ✅ 2. GENERATE SCRIPT
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 900,
+      messages: [
+        {
+          role: "user",
+          content: `
+Buat konten TikTok marketing dalam Bahasa Indonesia.
 
 Produk: ${product}
 Deskripsi: ${finalDescription}
-Target: ${target}
-Harga: ${price}
-Style: ${style}
+Target: ${target || "umum"}
+Harga: ${price || "tidak disebutkan"}
+Style: ${style || "soft"}
 
-WAJIB gunakan format ini:
+WAJIB gunakan FORMAT PERSIS ini (jangan ubah nama tag):
 
 [STORY]
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
+1. Hook/Problem: ...
+2. Agitasi: ...
+3. Solusi Reveal: ...
+4. Close Up Produk: ...
+5. Demo/Cara Pakai: ...
+6. Before vs After: ...
+7. Social Proof: ...
+8. Benefit Utama: ...
+9. Benefit Kedua: ...
+10. Call to Action: ...
 
 [IMAGE]
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
+1. Hook/Problem: (deskripsi visual dalam bahasa Inggris untuk AI image generation)
+2. Agitasi: (deskripsi visual dalam bahasa Inggris)
+3. Solusi Reveal: (deskripsi visual dalam bahasa Inggris)
+4. Close Up: (deskripsi visual dalam bahasa Inggris)
+5. Demo: (deskripsi visual dalam bahasa Inggris)
+6. Before vs After: (deskripsi visual dalam bahasa Inggris)
+7. Social Proof: (deskripsi visual dalam bahasa Inggris)
+8. Benefit Utama: (deskripsi visual dalam bahasa Inggris)
+9. Benefit Kedua: (deskripsi visual dalam bahasa Inggris)
+10. CTA: (deskripsi visual dalam bahasa Inggris)
 
 [VIDEO]
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
+Deskripsikan transisi, durasi tiap scene, dan music mood yang cocok.
 
 [NARASI]
-...
+Script narasi lengkap yang bisa dibacakan saat video diputar.
 
 [CAPTION]
-...
-`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: prompt }],
+Caption TikTok lengkap dengan hashtag.
+`,
+        },
+      ],
     });
 
-    const text = completion.choices[0].message.content;
+    const text = completion.choices?.[0]?.message?.content || "";
 
-    // 🔥 3. AMBIL IMAGE PROMPTS
-    const imageSection = text.split("[IMAGE]")[1]?.split("[VIDEO]")[0] || "";
+    // ✅ 3. PARSE 10 IMAGE PROMPTS dari section [IMAGE]
+    const imageSection = text.includes("[IMAGE]")
+      ? text.split("[IMAGE]")[1]?.split("[VIDEO]")[0]
+      : "";
 
-    const prompts = imageSection
+    let prompts = (imageSection || "")
       .split("\n")
-      .map((p) => p.replace(/^\d+\.\s*/, "").trim())
-      .filter((p) => p.length > 0)
-      .slice(0, 5);
+      .map((line) => line.replace(/^\d+\.\s*[\w\s\/]+:\s*/i, "").trim())
+      .filter((p) => p.length > 10);
 
-    // 🔥 4. GENERATE GAMBAR + DEBUG
-    const images = [];
+    // Fallback per scene kalau parse gagal
+    const fallbackPrompts = [
+      `frustrated person experiencing a problem that ${product} can solve, emotional expression, realistic`,
+      `close up dramatic shot of the problem before using ${product}, moody lighting`,
+      `${product} appearing as the hero solution, product reveal, clean bright background`,
+      `macro close up detail shot of ${product}, beautiful texture, sharp focus`,
+      `happy person using ${product} in everyday life, natural lifestyle setting`,
+      `split comparison before and after results of using ${product}, dramatic transformation`,
+      `group of diverse happy customers smiling with ${product}, social proof`,
+      `${product} highlighting its main key benefit, bold visual, lifestyle context`,
+      `${product} showing secondary feature or bonus benefit, clean aesthetic`,
+      `${product} displayed with price and urgency, call to action, order now`,
+    ];
 
-    for (let p of prompts) {
+    if (prompts.length < 5) {
+      prompts = fallbackPrompts;
+    }
+
+    // Pastikan selalu 10
+    prompts = prompts.slice(0, 10);
+    while (prompts.length < 10) {
+      prompts.push(fallbackPrompts[prompts.length] || `${product} TikTok marketing scene ${prompts.length + 1}`);
+    }
+
+    // ✅ 4. GENERATE 10 GAMBAR satu per satu — portrait TikTok 9:16
+    const generatedImages = [];
+
+    for (let i = 0; i < 10; i++) {
+      const role = SCENE_ROLES[i];
+      const prompt = prompts[i];
+
       try {
+        const finalPrompt = `${prompt}, vertical 9:16 portrait orientation, TikTok short video style, cinematic lighting, high quality photography, no text, no watermark`;
+
+        console.log(`Generating image ${i + 1}/10 [${role}]`);
+
         const img = await openai.images.generate({
-          model: "gpt-image-1",
-          prompt: p,
-          size: "1024x1024",
+          model: "dall-e-3",
+          prompt: finalPrompt,
+          size: "1024x1792",    // Portrait — cocok untuk TikTok
+          quality: "standard",  // Standard = hemat, bukan hd
+          n: 1,
         });
 
-        images.push(img.data?.[0]?.url || null);
+        generatedImages.push({
+          url: img.data?.[0]?.url || null,
+          scene: i + 1,
+          role,
+        });
 
       } catch (err) {
-        console.error("IMAGE ERROR:", err.message);
-
-        // 🔥 fallback biar tetap ada output
-        images.push("ERROR: " + err.message);
+        console.error(`IMG ${i + 1} ERROR:`, err.message);
+        generatedImages.push({ url: null, scene: i + 1, role });
       }
     }
 
-    // 🔥 RESPONSE FINAL
-    res.status(200).json({
+    return res.status(200).json({
       result: text,
-      images,
+      images: generatedImages,
     });
 
   } catch (error) {
     console.error("MAIN ERROR:", error.message);
-
-    res.status(500).json({
-      error: error.message,
+    return res.status(500).json({
+      error: error.message || "Terjadi kesalahan server.",
     });
   }
 }
